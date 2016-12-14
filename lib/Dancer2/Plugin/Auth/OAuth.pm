@@ -7,6 +7,7 @@ our $VERSION = '0.10';
 use Dancer2::Core::Types qw/Dancer2Prefix HashRef/;
 use Dancer2::Plugin;
 use Module::Load;
+use Scalar::Util ();
 
 # config attributes
 
@@ -37,6 +38,7 @@ has success_url => (
 # setup the plugin
 sub BUILD {
     my $plugin = shift;
+    Scalar::Util::weaken( my $weak_plugin = $plugin );
 
     for my $provider ( keys %{$plugin->providers} ) {
 
@@ -60,9 +62,9 @@ sub BUILD {
             method => 'get',
             regexp => sprintf( "%s/%s", $plugin->prefix, lc($provider) ),
             code   => sub {
-                $plugin->app->redirect(
-                    $plugin->app->{_oauth}{$provider}->authentication_url(
-                        $plugin->app->request->uri_base
+                $weak_plugin->app->redirect(
+                    $weak_plugin->app->{_oauth}{$provider}->authentication_url(
+                        $weak_plugin->app->request->uri_base
                     )
                 )
             },
@@ -72,13 +74,13 @@ sub BUILD {
             regexp => sprintf( "%s/%s/callback", $plugin->prefix, lc($provider) ),
             code   => sub {
                 my $redirect;
-                if( $plugin->app->{_oauth}{$provider}->callback($plugin->app->request, $plugin->app->session) ) {
-                    $redirect = $plugin->success_url;
+                if( $weak_plugin->app->{_oauth}{$provider}->callback($weak_plugin->app->request, $weak_plugin->app->session) ) {
+                    $redirect = $weak_plugin->success_url;
                 } else {
-                    $redirect = $plugin->error_url;
+                    $redirect = $weak_plugin->error_url;
                 }
 
-                $plugin->app->redirect( $redirect );
+                $weak_plugin->app->redirect( $redirect );
             },
         );
     }
