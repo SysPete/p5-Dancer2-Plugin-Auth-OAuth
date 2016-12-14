@@ -4,56 +4,85 @@ use strict;
 use 5.008_005;
 our $VERSION = '0.10';
 
+use Dancer2::Core::Types qw/Dancer2Prefix HashRef/;
 use Dancer2::Plugin;
 use Module::Load;
 
+# config attributes
+
+has error_url => (
+    is          => 'ro',
+    isa         => Dancer2Prefix,
+    from_config => sub { '/' },
+);
+
+has prefix => (
+    is          => 'ro',
+    isa         => Dancer2Prefix,
+    from_config => sub { '/auth' },
+);
+
+has providers => (
+    is          => 'ro',
+    isa         => HashRef,
+    from_config => sub { +{} },
+);
+
+has success_url => (
+    is          => 'ro',
+    isa         => Dancer2Prefix,
+    from_config => sub { '/' },
+);
+
 # setup the plugin
-on_plugin_import {
-    my $dsl      = shift;
-    my $settings = plugin_setting;
+sub BUILD {
+    my $plugin = shift;
 
-    $settings->{prefix} ||= '/auth';
-
-    for my $provider ( keys %{$settings->{providers} || {}} ) {
+    for my $provider ( keys %{$plugin->providers} ) {
 
         # load the provider plugin
         my $provider_class = __PACKAGE__."::Provider::".$provider;
         eval { load $provider_class; 1; } or do {
-            $dsl->app->log(debug => "Couldn't load $provider_class");
+            $plugin->app->log(debug => "Couldn't load $provider_class");
             next;
         };
-        $dsl->app->{_oauth}{$provider} ||= $provider_class->new($settings);
+        $plugin->app->{_oauth}{$provider} ||= $provider_class->new(
+            {
+                error_url   => $plugin->error_url,
+                prefix      => $plugin->prefix,
+                providers   => $plugin->providers,
+                success_url => $plugin->success_url
+            }
+        );
 
         # add the routes
-        $dsl->app->add_route(
+        $plugin->app->add_route(
             method => 'get',
-            regexp => sprintf( "%s/%s", $settings->{prefix}, lc($provider) ),
+            regexp => sprintf( "%s/%s", $plugin->prefix, lc($provider) ),
             code   => sub {
-                $dsl->app->redirect(
-                    $dsl->app->{_oauth}{$provider}->authentication_url(
-                        $dsl->app->request->uri_base
+                $plugin->app->redirect(
+                    $plugin->app->{_oauth}{$provider}->authentication_url(
+                        $plugin->app->request->uri_base
                     )
                 )
             },
         );
-        $dsl->app->add_route(
+        $plugin->app->add_route(
             method => 'get',
-            regexp => sprintf( "%s/%s/callback", $settings->{prefix}, lc($provider) ),
+            regexp => sprintf( "%s/%s/callback", $plugin->prefix, lc($provider) ),
             code   => sub {
                 my $redirect;
-                if( $dsl->app->{_oauth}{$provider}->callback($dsl->app->request, $dsl->app->session) ) {
-                    $redirect = $settings->{success_url} || '/';
+                if( $plugin->app->{_oauth}{$provider}->callback($plugin->app->request, $plugin->app->session) ) {
+                    $redirect = $plugin->success_url;
                 } else {
-                    $redirect = $settings->{error_url}   || '/';
+                    $redirect = $plugin->error_url;
                 }
 
-                $dsl->app->redirect( $redirect );
+                $plugin->app->redirect( $redirect );
             },
         );
     }
 };
-
-register_plugin;
 
 1;
 __END__
